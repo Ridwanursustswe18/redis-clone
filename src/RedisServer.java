@@ -1,5 +1,6 @@
 import java.io.*;
 import java.net.*;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -8,7 +9,7 @@ import java.util.concurrent.Executors;
 public class RedisServer {
     private static final int PORT = 6379;
     private static final Map<String, String> dataStore = new HashMap<>();
-    private static final ExecutorService threadPool = Executors.newFixedThreadPool(10);
+    private static final ExecutorService threadPool = Executors.newFixedThreadPool(50);
 
     public static void main(String[] args) {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
@@ -73,6 +74,7 @@ public class RedisServer {
                     command[i] = new String(buffer);
                     reader.readLine(); // Consume CRLF
                 }
+
                 executeCommand(command, outputStream);
             }
         } catch (IOException e) {
