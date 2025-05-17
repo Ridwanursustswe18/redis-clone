@@ -36,17 +36,14 @@ public class RedisClient {
     private static void runBenchmarkMode(Scanner scanner) {
         System.out.print("Enter Redis command to benchmark (e.g., 'SET key value' or 'GET key'): ");
         String command = scanner.nextLine().trim();
-
         System.out.print("Enter number of requests per client (e.g., 100): ");
         int requestsPerClient = scanner.nextInt();
         scanner.nextLine();
-
         List<String> commandArgs = parseCommandLine(command);
         if (commandArgs.isEmpty()) {
             System.out.println("Please enter a valid command");
             return;
         }
-
         System.out.println("\nStarting benchmark with:");
         System.out.println("- " + NUM_CLIENTS + " concurrent clients");
         System.out.println("- " + requestsPerClient + " requests per client");
@@ -82,10 +79,7 @@ public class RedisClient {
             int totalRequests = NUM_CLIENTS * requestsPerClient;
             double requestsPerSecond = totalRequests / totalTimeSeconds;
 
-            // Calculate percentiles
             double p50 = calculatePercentile(50);
-            double p90 = calculatePercentile(90);
-            double p99 = calculatePercentile(99);
 
             System.out.println("\nBenchmark Results:");
             System.out.println("=================");
@@ -95,8 +89,6 @@ public class RedisClient {
             System.out.println("Failed requests: " + errorCount.get());
             System.out.println("Requests per second: " + String.format("%.2f", requestsPerSecond));
             System.out.println("p50 latency: " + String.format("%.3f", p50) + " msec");
-            System.out.println("p90 latency: " + String.format("%.3f", p90) + " msec");
-            System.out.println("p99 latency: " + String.format("%.3f", p99) + " msec");
 
         } catch (InterruptedException e) {
             System.err.println("Benchmark interrupted: " + e.getMessage());
