@@ -144,6 +144,7 @@ public class RedisClient {
                 }
 
                 List<String> commandArgs = parseCommandLine(commandLine);
+
                 if (commandArgs.isEmpty()) {
                     System.out.println("Please enter a valid command");
                     continue;

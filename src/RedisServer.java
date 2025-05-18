@@ -10,7 +10,8 @@ public class RedisServer {
     private static final int PORT = 6379;
     private static final Map<String, String> dataStore = new HashMap<>();
     private static final ExecutorService threadPool = Executors.newFixedThreadPool(50);
-
+    private static final Map<String, Long> keyExpiryTimes = new HashMap<>();
+    private static final long CLEANUP_INTERVAL_MS = 1000;
     public static void main(String[] args) {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Redis clone server started on port " + PORT);
@@ -20,6 +21,19 @@ public class RedisServer {
                     Socket clientSocket = serverSocket.accept();
                     System.out.println("Client connected: " + clientSocket.getInetAddress());
                     threadPool.execute(() -> handleClient(clientSocket));
+                    Thread cleanupThread = new Thread(() -> {
+                        while (!Thread.currentThread().isInterrupted()) {
+                            try {
+                                Thread.sleep(CLEANUP_INTERVAL_MS);
+                                cleanupExpiredKeys();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                        }
+                    });
+                    cleanupThread.setDaemon(true);
+                    cleanupThread.start();
                 } catch (IOException e) {
                     System.err.println("Error accepting client connection: " + e.getMessage());
                 }
@@ -38,6 +52,7 @@ public class RedisServer {
         ) {
             while (!clientSocket.isClosed()) {
                 String arrayHeader = reader.readLine();
+                System.out.println(arrayHeader);
                 if (arrayHeader == null) break;
 
                 if (!arrayHeader.startsWith("*")) {
@@ -87,6 +102,28 @@ public class RedisServer {
             }
         }
     }
+    private static boolean isKeyExpired(String key) {
+        Long expiryTime = keyExpiryTimes.get(key);
+        if (expiryTime == null) {
+            return false;
+        }
+        return System.currentTimeMillis() > expiryTime;
+    }
+
+    private static void removeExpiredKey(String key) {
+        dataStore.remove(key);
+        keyExpiryTimes.remove(key);
+    }
+    private static void cleanupExpiredKeys() {
+        keyExpiryTimes.entrySet().removeIf(entry -> {
+            if (System.currentTimeMillis() > entry.getValue()) {
+                String key = entry.getKey();
+                dataStore.remove(key);
+                return true;
+            }
+            return false;
+        });
+    }
 
     private static void executeCommand(String[] command, OutputStream outputStream) throws IOException {
         if (command.length == 0) {
@@ -113,6 +150,19 @@ public class RedisServer {
                     sendError(outputStream, "ERR wrong number of arguments for 'SET' command");
                 } else {
                     dataStore.put(command[1], command[2]);
+                    if (command.length >= 5) {
+                        String option = command[3].toUpperCase();
+                        try {
+                            long expiry = Long.parseLong(command[4]);
+                            if (option.contains("EX") || option.contains("EAXT")) {
+                                keyExpiryTimes.put(command[1], System.currentTimeMillis() + (expiry * 1000));
+                            }else {
+                                keyExpiryTimes.put(command[1], System.currentTimeMillis() + expiry);
+                            }
+                        } catch (NumberFormatException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
                     sendSimpleString(outputStream, "OK");
                 }
                 break;
@@ -121,11 +171,17 @@ public class RedisServer {
                 if (command.length < 2) {
                     sendError(outputStream, "ERR wrong number of arguments for 'GET' command");
                 } else {
-                    String value = dataStore.get(command[1]);
-                    if (value != null) {
-                        sendBulkString(outputStream, value);
-                    } else {
+                    String key = command[1];
+                    if (isKeyExpired(key)) {
+                        removeExpiredKey(key);
                         sendNullBulkString(outputStream);
+                    } else {
+                        String value = dataStore.get(key);
+                        if (value != null) {
+                            sendBulkString(outputStream, value);
+                        } else {
+                            sendNullBulkString(outputStream);
+                        }
                     }
                 }
                 break;
