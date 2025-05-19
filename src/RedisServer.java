@@ -209,6 +209,11 @@ public class RedisServer {
                 } else {
                     int count = 0;
                     for (int i = 1; i < command.length; i++) {
+                        String key = command[i];
+                        if (isKeyExpired(key)) {
+                            removeExpiredKey(key);
+                            sendNullBulkString(outputStream);
+                        }
                         if (dataStore.remove(command[i]) != null) {
                             count++;
                         }
@@ -223,7 +228,12 @@ public class RedisServer {
                 } else {
                     int count = 0;
                     for (int i = 1; i < command.length; i++) {
-                        if (dataStore.containsKey(command[i])) {
+                        String key = command[i];
+                        if (isKeyExpired(key)) {
+                            removeExpiredKey(key);
+                            sendNullBulkString(outputStream);
+                        }
+                        if (dataStore.containsKey(key)){
                             count++;
                         }
                     }
