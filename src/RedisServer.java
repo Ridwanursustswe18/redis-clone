@@ -1,8 +1,6 @@
 import java.io.*;
 import java.net.*;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -11,7 +9,10 @@ public class RedisServer {
     private static final Map<String, String> dataStore = new HashMap<>();
     private static final ExecutorService threadPool = Executors.newFixedThreadPool(50);
     private static final Map<String, Long> keyExpiryTimes = new HashMap<>();
-    private static final long CLEANUP_INTERVAL_MS = 1000;
+    private static final double TRIGGER_PROBABILITY = 0.10;
+    private static final int KEYS_TO_SAMPLE = 10;
+    private static final double CONTINUE_THRESHOLD = 0.25;
+
     public static void main(String[] args) {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Redis clone server started on port " + PORT);
@@ -21,19 +22,6 @@ public class RedisServer {
                     Socket clientSocket = serverSocket.accept();
                     System.out.println("Client connected: " + clientSocket.getInetAddress());
                     threadPool.execute(() -> handleClient(clientSocket));
-                    Thread cleanupThread = new Thread(() -> {
-                        while (!Thread.currentThread().isInterrupted()) {
-                            try {
-                                Thread.sleep(CLEANUP_INTERVAL_MS);
-                                cleanupExpiredKeys();
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                break;
-                            }
-                        }
-                    });
-                    cleanupThread.setDaemon(true);
-                    cleanupThread.start();
                 } catch (IOException e) {
                     System.err.println("Error accepting client connection: " + e.getMessage());
                 }
@@ -102,6 +90,44 @@ public class RedisServer {
             }
         }
     }
+    private static void probabilisticKeyExpiration() {
+        // Only run the sampling with a 10% probability
+        if (Math.random() >= TRIGGER_PROBABILITY) {
+            return;
+        }
+        // Continue sampling as long as we're finding many expired keys
+        boolean continueChecking;
+        int maxRounds = 20;
+        do {
+            continueChecking = sampleAndExpireKeys();
+            maxRounds--;
+        } while (continueChecking && maxRounds > 0);
+    }
+
+    private static boolean sampleAndExpireKeys() {
+        // Get up to KEYS_TO_SAMPLE random keys with expiry times
+        List<String> keysWithExpiry = new ArrayList<>(keyExpiryTimes.keySet());
+        if (keysWithExpiry.isEmpty()) {
+            return false;
+        }
+
+        Collections.shuffle(keysWithExpiry);
+        int sampleSize = Math.min(KEYS_TO_SAMPLE, keysWithExpiry.size());
+        List<String> sampledKeys = keysWithExpiry.subList(0, sampleSize);
+        int expiredCount = 0;
+        long now = System.currentTimeMillis();
+        for (String key : sampledKeys) {
+            Long expiryTime = keyExpiryTimes.get(key);
+            if (expiryTime != null && now > expiryTime) {
+                dataStore.remove(key);
+                keyExpiryTimes.remove(key);
+                expiredCount++;
+            }
+        }
+
+        // If more than 25% of keys were expired, signal to continue sampling
+        return (double) expiredCount / sampleSize > CONTINUE_THRESHOLD;
+    }
     private static boolean isKeyExpired(String key) {
         Long expiryTime = keyExpiryTimes.get(key);
         if (expiryTime == null) {
@@ -114,18 +140,9 @@ public class RedisServer {
         dataStore.remove(key);
         keyExpiryTimes.remove(key);
     }
-    private static void cleanupExpiredKeys() {
-        keyExpiryTimes.entrySet().removeIf(entry -> {
-            if (System.currentTimeMillis() > entry.getValue()) {
-                String key = entry.getKey();
-                dataStore.remove(key);
-                return true;
-            }
-            return false;
-        });
-    }
 
     private static void executeCommand(String[] command, OutputStream outputStream) throws IOException {
+        probabilisticKeyExpiration();
         if (command.length == 0) {
             sendError(outputStream, "ERR no command specified");
             return;
