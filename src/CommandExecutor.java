@@ -105,9 +105,65 @@ public class CommandExecutor {
                     serverRESPResponse.sendInteger(outputStream, count);
                 }
                 break;
+            case "INCR":
+                if (command.length < 2) {
+                    serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'INCR' command");
+                }else{
+                    String key = command[1];
+                    if (expiredKeyHandler.isKeyExpired(key)) {
+                        expiredKeyHandler.removeExpiredKey(key);
+                    }else if(RedisServer.dataStore.containsKey(key)){
+                        String val =  RedisServer.dataStore.get(key);
+                        if (isWholeStringInteger(val)){
+                            int newVal = Integer.parseInt(val) + 1;
+                            RedisServer.dataStore.put(key,String.valueOf(newVal));
+                            serverRESPResponse.sendInteger(outputStream, newVal);
+                        }else{
+                            serverRESPResponse.sendError(outputStream, "(error) ERR value is not an integer or out of range");
+                        }
 
+                    }else{
+                        RedisServer.dataStore.put(key,"1");
+                        serverRESPResponse.sendInteger(outputStream, 1);
+                    }
+
+                }
+                break;
+            case "DECR":
+                if (command.length < 2) {
+                    serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'DECR' command");
+                }else{
+                    String key = command[1];
+                    if (expiredKeyHandler.isKeyExpired(key)) {
+                        expiredKeyHandler.removeExpiredKey(key);
+                    }else if(RedisServer.dataStore.containsKey(key)){
+                        String val =  RedisServer.dataStore.get(key);
+                        if (isWholeStringInteger(val)){
+                            int newVal = Integer.parseInt(val) - 1;
+                            RedisServer.dataStore.put(key,String.valueOf(newVal));
+                            serverRESPResponse.sendInteger(outputStream, newVal);
+                        }else{
+                            serverRESPResponse.sendError(outputStream, "(error) ERR value is not an integer or out of range");
+                        }
+
+                    }else{
+                        RedisServer.dataStore.put(key,"0");
+                        serverRESPResponse.sendInteger(outputStream, 0);
+                    }
+
+                }
+                break;
             default:
                 serverRESPResponse.sendError(outputStream, "ERR unknown command '" + cmd + "'");
         }
     }
+    public boolean isWholeStringInteger(String input) {
+        try {
+            Integer.parseInt(input);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
 }
