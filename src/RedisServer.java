@@ -1,6 +1,8 @@
 import java.io.*;
 import java.net.*;
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -14,7 +16,7 @@ public class RedisServer {
     private static final  ExpiredKeyHandler expiredKeyHandler = new ExpiredKeyHandler();
     private static final CommandExecutor commandExecutor = new CommandExecutor(expiredKeyHandler,serverRESPResponse);
     private static final ClientHandler clientHandler = new ClientHandler(commandExecutor);
-
+    static final Map<String, LinkedList<String>> listDataStore = new HashMap<>();
     public static void main(String[] args) {
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("Redis clone server started on port " + PORT);

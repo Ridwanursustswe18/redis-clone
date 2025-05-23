@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.LinkedList;
 
 public class CommandExecutor {
     private final ExpiredKeyHandler expiredKeyHandler;
@@ -112,6 +113,8 @@ public class CommandExecutor {
                     String key = command[1];
                     if (expiredKeyHandler.isKeyExpired(key)) {
                         expiredKeyHandler.removeExpiredKey(key);
+                        RedisServer.dataStore.put(key,"1");
+                        serverRESPResponse.sendInteger(outputStream, 1);
                     }else if(RedisServer.dataStore.containsKey(key)){
                         String val =  RedisServer.dataStore.get(key);
                         if (isWholeStringInteger(val)){
@@ -136,6 +139,8 @@ public class CommandExecutor {
                     String key = command[1];
                     if (expiredKeyHandler.isKeyExpired(key)) {
                         expiredKeyHandler.removeExpiredKey(key);
+                        RedisServer.dataStore.put(key,"0");
+                        serverRESPResponse.sendInteger(outputStream, 0);
                     }else if(RedisServer.dataStore.containsKey(key)){
                         String val =  RedisServer.dataStore.get(key);
                         if (isWholeStringInteger(val)){
@@ -153,11 +158,59 @@ public class CommandExecutor {
 
                 }
                 break;
+            case "LPUSH":
+                if (command.length < 2) {
+                    serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'LPUSH' command");
+                }else{
+                    String key = command[1];
+                    int count;
+                    if(RedisServer.listDataStore.containsKey(key)){
+                        LinkedList<String> currList = RedisServer.listDataStore.get(key);
+                        for (int i = 2; i < command.length; i++){
+                            currList.addFirst(command[i]);
+                        }
+                        count = currList.size();
+                        RedisServer.listDataStore.put(key, currList);
+                    }else {
+                        LinkedList<String> list = new LinkedList<>();
+                        for (int i = 2; i < command.length; i++) {
+                            list.addFirst(command[i]);
+                        }
+                        count = list.size();
+                        RedisServer.listDataStore.put(key, list);
+                    }
+                    serverRESPResponse.sendInteger(outputStream, count);
+                }
+                break;
+            case "RPUSH":
+                if (command.length < 2) {
+                    serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'RPUSH' command");
+                }else{
+                    String key = command[1];
+                    int count;
+                    if(RedisServer.listDataStore.containsKey(key)){
+                        LinkedList<String> currList = RedisServer.listDataStore.get(key);
+                        for (int i = 2; i < command.length; i++){
+                            currList.addLast(command[i]);
+                        }
+                        count = currList.size();
+                        RedisServer.listDataStore.put(key, currList);
+                    }else {
+                        LinkedList<String> list = new LinkedList<>();
+                        for (int i = 2; i < command.length; i++) {
+                            list.addFirst(command[i]);
+                        }
+                        count = list.size();
+                        RedisServer.listDataStore.put(key, list);
+                    }
+                    serverRESPResponse.sendInteger(outputStream, count);
+                }
+                break;
             default:
                 serverRESPResponse.sendError(outputStream, "ERR unknown command '" + cmd + "'");
         }
     }
-    public boolean isWholeStringInteger(String input) {
+    private boolean isWholeStringInteger(String input) {
         try {
             Integer.parseInt(input);
             return true;
