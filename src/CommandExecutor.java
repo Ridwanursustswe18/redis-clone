@@ -1,15 +1,19 @@
-import java.io.IOException;
-import java.io.OutputStream;
+import java.io.*;
 import java.util.LinkedList;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class CommandExecutor {
     private final ExpiredKeyHandler expiredKeyHandler;
-    private final ServerRESPResponse serverRESPResponse ;
+    private final ServerRESPResponse serverRESPResponse;
+    private final KeyPersistenceService keyPersistenceService;
 
-    public CommandExecutor(ExpiredKeyHandler expiredKeyHandler, ServerRESPResponse serverRESPResponse) {
+    public CommandExecutor(ExpiredKeyHandler expiredKeyHandler, ServerRESPResponse serverRESPResponse, KeyPersistenceService keyPersistenceService) {
         this.expiredKeyHandler = expiredKeyHandler;
         this.serverRESPResponse = serverRESPResponse;
+        this.keyPersistenceService = keyPersistenceService;
     }
+
 
     public void executeCommand(String[] command, OutputStream outputStream) throws IOException {
         expiredKeyHandler.probabilisticKeyExpiration();
@@ -36,6 +40,7 @@ public class CommandExecutor {
                 if (command.length < 3) {
                     serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'SET' command");
                 } else {
+                    RedisServer.numberOfKeysChanged++;
                     RedisServer.dataStore.put(command[1], command[2]);
                     if (command.length >= 5) {
                         String option = command[3].toUpperCase();
@@ -83,6 +88,7 @@ public class CommandExecutor {
                         if (expiredKeyHandler.isKeyExpired(key)) {
                             expiredKeyHandler.removeExpiredKey(key);
                         } else if (RedisServer.dataStore.remove(key) != null) {
+                            RedisServer.numberOfKeysChanged++;
                             count++;
                         }
                     }
@@ -106,10 +112,12 @@ public class CommandExecutor {
                     serverRESPResponse.sendInteger(outputStream, count);
                 }
                 break;
+
             case "INCR":
                 if (command.length < 2) {
                     serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'INCR' command");
                 }else{
+                    RedisServer.numberOfKeysChanged++;
                     String key = command[1];
                     if (expiredKeyHandler.isKeyExpired(key)) {
                         expiredKeyHandler.removeExpiredKey(key);
@@ -122,6 +130,7 @@ public class CommandExecutor {
                             RedisServer.dataStore.put(key,String.valueOf(newVal));
                             serverRESPResponse.sendInteger(outputStream, newVal);
                         }else{
+                            RedisServer.numberOfKeysChanged--;
                             serverRESPResponse.sendError(outputStream, "(error) ERR value is not an integer or out of range");
                         }
 
@@ -132,10 +141,12 @@ public class CommandExecutor {
 
                 }
                 break;
+
             case "DECR":
                 if (command.length < 2) {
                     serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'DECR' command");
                 }else{
+                    RedisServer.numberOfKeysChanged++;
                     String key = command[1];
                     if (expiredKeyHandler.isKeyExpired(key)) {
                         expiredKeyHandler.removeExpiredKey(key);
@@ -148,6 +159,7 @@ public class CommandExecutor {
                             RedisServer.dataStore.put(key,String.valueOf(newVal));
                             serverRESPResponse.sendInteger(outputStream, newVal);
                         }else{
+                            RedisServer.numberOfKeysChanged--;
                             serverRESPResponse.sendError(outputStream, "(error) ERR value is not an integer or out of range");
                         }
 
@@ -158,10 +170,12 @@ public class CommandExecutor {
 
                 }
                 break;
+
             case "LPUSH":
-                if (command.length < 2) {
+                if (command.length < 3) {
                     serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'LPUSH' command");
                 }else{
+                    RedisServer.numberOfKeysChanged++;
                     String key = command[1];
                     int count;
                     if(RedisServer.listDataStore.containsKey(key)){
@@ -182,10 +196,12 @@ public class CommandExecutor {
                     serverRESPResponse.sendInteger(outputStream, count);
                 }
                 break;
+
             case "RPUSH":
-                if (command.length < 2) {
+                if (command.length < 3) {
                     serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'RPUSH' command");
                 }else{
+                    RedisServer.numberOfKeysChanged++;
                     String key = command[1];
                     int count;
                     if(RedisServer.listDataStore.containsKey(key)){
@@ -198,7 +214,7 @@ public class CommandExecutor {
                     }else {
                         LinkedList<String> list = new LinkedList<>();
                         for (int i = 2; i < command.length; i++) {
-                            list.addFirst(command[i]);
+                            list.addLast(command[i]); // Fixed: was addFirst, should be addLast for RPUSH
                         }
                         count = list.size();
                         RedisServer.listDataStore.put(key, list);
@@ -206,10 +222,50 @@ public class CommandExecutor {
                     serverRESPResponse.sendInteger(outputStream, count);
                 }
                 break;
+
+            case "SAVE":
+                try {
+                    if (command.length == 1) {
+                        keyPersistenceService.saveDataToFile("dump.rdb");
+                        serverRESPResponse.sendSimpleString(outputStream, "OK");
+
+                    } else if (command.length == 3) {
+                        long intervalSeconds = Long.parseLong(command[1]);
+                        long minimumKeys = Long.parseLong(command[2]);
+
+                        if (intervalSeconds <= 0 || minimumKeys < 0) {
+                            serverRESPResponse.sendError(outputStream, "ERR invalid save parameters");
+                            break;
+                        }
+
+                        long intervalMs = intervalSeconds * 1000;
+                        keyPersistenceService.startBackgroundSave(intervalMs, minimumKeys);
+                        serverRESPResponse.sendSimpleString(outputStream, "OK");
+
+                    } else {
+                        serverRESPResponse.sendError(outputStream, "ERR wrong number of arguments for 'SAVE' command");
+                    }
+                } catch (NumberFormatException e) {
+                    serverRESPResponse.sendError(outputStream, "ERR invalid number format");
+                }
+                break;
+
+            case "BGSAVE":
+                try {
+                    Thread bgSaveThread = new Thread(() -> keyPersistenceService.saveDataToFile("dump.rdb"));
+                    bgSaveThread.setDaemon(true);
+                    bgSaveThread.start();
+                    serverRESPResponse.sendSimpleString(outputStream, "Background saving started");
+                } catch (Exception e) {
+                    serverRESPResponse.sendError(outputStream, "ERR " + e.getMessage());
+                }
+                break;
+
             default:
                 serverRESPResponse.sendError(outputStream, "ERR unknown command '" + cmd + "'");
         }
     }
+
     private boolean isWholeStringInteger(String input) {
         try {
             Integer.parseInt(input);
@@ -218,5 +274,4 @@ public class CommandExecutor {
             return false;
         }
     }
-
 }

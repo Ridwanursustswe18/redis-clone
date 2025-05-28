@@ -51,6 +51,7 @@ public class ExpiredKeyHandler {
     }
 
     public void removeExpiredKey(String key) {
+        RedisServer.numberOfKeysChanged++;
         RedisServer.dataStore.remove(key);
         RedisServer.keyExpiryTimes.remove(key);
     }
